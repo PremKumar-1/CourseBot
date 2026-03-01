@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+
+.venv/
+env/
+venv/
+
+coursebot.db
+
+.mypy_cache/
+.pytest_cache/
+
+*.sqlite3
+
