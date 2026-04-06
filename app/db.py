@@ -12,9 +12,10 @@ class CourseRow(TypedDict):
     course_code: str
     title: str
     description: str
-    credits: int
+    credits: float
     department: str
     prerequisites: List[str]
+    professor: Optional[str]
 
 
 class CourseAlreadyExistsError(Exception):
@@ -58,16 +59,50 @@ def init_db() -> None:
             """
         )
 
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS professors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+            """
+        )
+
+        cursor.execute("PRAGMA table_info(courses)")
+        course_cols = [row[1] for row in cursor.fetchall()]
+        if "professor_id" not in course_cols:
+            cursor.execute(
+                """
+                ALTER TABLE courses ADD COLUMN professor_id INTEGER
+                REFERENCES professors(id);
+                """
+            )
+
         conn.commit()
+
+
+def get_or_create_professor(name: str) -> int:
+    """Return professor id for name, inserting if needed."""
+    clean = name.strip()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM professors WHERE name = ?", (clean,))
+        row = cursor.fetchone()
+        if row:
+            return int(row[0])
+        cursor.execute("INSERT INTO professors (name) VALUES (?)", (clean,))
+        conn.commit()
+        return int(cursor.lastrowid)
 
 
 def insert_course(
     course_code: str,
     title: str,
     description: str,
-    credits: int,
+    credits: float,
     department: str,
     prerequisites: Iterable[str],
+    professor_id: Optional[int] = None,
 ) -> int:
     """Insert a new course and its prerequisites; returns the new course id."""
     with get_connection() as conn:
@@ -77,10 +112,10 @@ def insert_course(
         try:
             cursor.execute(
                 """
-                INSERT INTO courses (course_code, title, description, credits, department)
-                VALUES (?, ?, ?, ?, ?);
+                INSERT INTO courses (course_code, title, description, credits, department, professor_id)
+                VALUES (?, ?, ?, ?, ?, ?);
                 """,
-                (course_code, title, description, credits, department),
+                (course_code, title, description, credits, department, professor_id),
             )
         except sqlite3.IntegrityError as exc:
             # Likely UNIQUE constraint violation on course_code
@@ -107,20 +142,35 @@ def insert_course(
         return course_id
 
 
+def set_course_professor(course_id: int, professor_id: Optional[int]) -> None:
+    """Set or clear courses.professor_id (use None to clear)."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE courses SET professor_id = ? WHERE id = ?",
+            (professor_id, course_id),
+        )
+        conn.commit()
+
+
 def _rows_to_course_rows(rows: List[sqlite3.Row]) -> List[CourseRow]:
     """Convert denormalized join rows into aggregated CourseRow objects."""
     by_id: dict[int, CourseRow] = {}
     for row in rows:
         course_id = row["id"]
         if course_id not in by_id:
+            prof = row["professor"] if "professor" in row.keys() and row["professor"] else None
+            cr = row["credits"]
+            credits_val: float = float(cr) if cr is not None else 0.0
             by_id[course_id] = CourseRow(
                 id=course_id,
                 course_code=row["course_code"],
                 title=row["title"],
                 description=row["description"],
-                credits=row["credits"],
+                credits=credits_val,
                 department=row["department"],
                 prerequisites=[],
+                professor=prof,
             )
         prereq_code = row["prerequisite_code"]
         if prereq_code is not None and prereq_code not in by_id[course_id]["prerequisites"]:
@@ -130,43 +180,50 @@ def _rows_to_course_rows(rows: List[sqlite3.Row]) -> List[CourseRow]:
 
 def get_all_courses_with_prereqs(
     department: Optional[str] = None,
+    credits: Optional[int] = None,
+    has_prerequisites: Optional[bool] = None,
 ) -> List[CourseRow]:
+    """Get all courses with optional filters. Case-insensitive department match."""
     with get_connection() as conn:
         cursor = conn.cursor()
+        conditions: List[str] = []
+        params: List[object] = []
 
-        if department:
-            cursor.execute(
-                """
-                SELECT c.id,
-                       c.course_code,
-                       c.title,
-                       c.description,
-                       c.credits,
-                       c.department,
-                       p.prerequisite_code
-                FROM courses c
-                LEFT JOIN prerequisites p ON c.id = p.course_id
-                WHERE c.department = ?
-                ORDER BY c.course_code;
-                """,
-                (department,),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT c.id,
-                       c.course_code,
-                       c.title,
-                       c.description,
-                       c.credits,
-                       c.department,
-                       p.prerequisite_code
-                FROM courses c
-                LEFT JOIN prerequisites p ON c.id = p.course_id
-                ORDER BY c.course_code;
-                """
-            )
+        if department is not None and department.strip():
+            conditions.append("LOWER(TRIM(c.department)) = LOWER(TRIM(?))")
+            params.append(department.strip())
+        if credits is not None:
+            conditions.append("c.credits = ?")
+            params.append(credits)
+        if has_prerequisites is not None:
+            if has_prerequisites:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM prerequisites p2 WHERE p2.course_id = c.id)"
+                )
+            else:
+                conditions.append(
+                    "NOT EXISTS (SELECT 1 FROM prerequisites p2 WHERE p2.course_id = c.id)"
+                )
 
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        cursor.execute(
+            f"""
+            SELECT c.id,
+                   c.course_code,
+                   c.title,
+                   c.description,
+                   c.credits,
+                   c.department,
+                   pf.name AS professor,
+                   p.prerequisite_code
+            FROM courses c
+            LEFT JOIN professors pf ON c.professor_id = pf.id
+            LEFT JOIN prerequisites p ON c.id = p.course_id
+            WHERE {where_clause}
+            ORDER BY c.course_code;
+            """,
+            tuple(params),
+        )
         rows = cursor.fetchall()
         return _rows_to_course_rows(rows)
 
@@ -182,13 +239,43 @@ def get_course_with_prereqs(course_id: int) -> Optional[CourseRow]:
                    c.description,
                    c.credits,
                    c.department,
+                   pf.name AS professor,
                    p.prerequisite_code
             FROM courses c
+            LEFT JOIN professors pf ON c.professor_id = pf.id
             LEFT JOIN prerequisites p ON c.id = p.course_id
             WHERE c.id = ?
             ORDER BY c.course_code;
             """,
             (course_id,),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+        return _rows_to_course_rows(rows)[0]
+
+
+def get_course_by_code(course_code: str) -> Optional[CourseRow]:
+    """Look up a course by course_code (case-insensitive). Returns same shape as get_course_with_prereqs."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT c.id,
+                   c.course_code,
+                   c.title,
+                   c.description,
+                   c.credits,
+                   c.department,
+                   pf.name AS professor,
+                   p.prerequisite_code
+            FROM courses c
+            LEFT JOIN professors pf ON c.professor_id = pf.id
+            LEFT JOIN prerequisites p ON c.id = p.course_id
+            WHERE LOWER(TRIM(c.course_code)) = LOWER(TRIM(?))
+            ORDER BY c.course_code;
+            """,
+            (course_code.strip(),),
         )
         rows = cursor.fetchall()
         if not rows:
@@ -209,15 +296,18 @@ def search_courses(query: str) -> List[CourseRow]:
                    c.description,
                    c.credits,
                    c.department,
+                   pf.name AS professor,
                    p.prerequisite_code
             FROM courses c
+            LEFT JOIN professors pf ON c.professor_id = pf.id
             LEFT JOIN prerequisites p ON c.id = p.course_id
             WHERE LOWER(c.course_code) LIKE LOWER(?)
                OR LOWER(c.title) LIKE LOWER(?)
                OR LOWER(c.description) LIKE LOWER(?)
+               OR LOWER(IFNULL(pf.name, '')) LIKE LOWER(?)
             ORDER BY c.course_code;
             """,
-            (like_pattern, like_pattern, like_pattern),
+            (like_pattern, like_pattern, like_pattern, like_pattern),
         )
         rows = cursor.fetchall()
         return _rows_to_course_rows(rows)
