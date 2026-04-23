@@ -40,13 +40,17 @@
     }
 
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
+    /* Lock layout to one viewport: only .messages scrolls (not the whole page). */
+    html, body {
+      height: 100%;
+      margin: 0;
+      max-height: 100%;
+      overflow: hidden;
+    }
     body {
       font-family: var(--font);
       background: var(--bg-void);
       color: var(--text);
-      min-height: 100vh;
-      margin: 0;
       -webkit-font-smoothing: antialiased;
     }
 
@@ -54,7 +58,8 @@
     .shell {
       width: 100%;
       max-width: none;
-      min-height: 100vh;
+      height: 100%;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -230,6 +235,7 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      overflow: hidden;
       background:
         linear-gradient(var(--bg-surface), var(--bg-surface)),
         repeating-linear-gradient(
@@ -309,7 +315,9 @@
 
     .messages {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 1rem clamp(1rem, 4vw, 3rem) 7.5rem;
       display: flex;
       flex-direction: column;
@@ -781,6 +789,28 @@
       return (Math.abs(x % 1) < 1e-9 ? String(Math.round(x)) : x.toFixed(1)) + ' cr';
     }
 
+    /** Scroll the thread so the latest message is visible (e.g. after send while scrolled up). */
+    function scrollMessagesToEnd(smooth) {
+      var snap = function () {
+        messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
+      };
+      if (!smooth) {
+        snap();
+        requestAnimationFrame(function () {
+          requestAnimationFrame(snap);
+        });
+        return;
+      }
+      try {
+        messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
+      } catch (e) {
+        snap();
+        return;
+      }
+      /* Large bubbles (course cards) can grow after first paint — snap once layout settles. */
+      window.setTimeout(snap, 500);
+    }
+
     function addBotMessage(content, data) {
       hideEmptyState();
       const row = document.createElement('div');
@@ -873,7 +903,7 @@
       row.appendChild(avatar);
       row.appendChild(wrap);
       messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scrollMessagesToEnd(true);
     }
 
     function addUserMessage(text) {
@@ -892,7 +922,7 @@
       row.appendChild(avatar);
       row.appendChild(wrap);
       messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scrollMessagesToEnd(true);
     }
 
     function showLoading() {
@@ -914,7 +944,7 @@
       row.appendChild(avatar);
       row.appendChild(wrap);
       messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scrollMessagesToEnd(false);
     }
 
     function removeLoading() {
