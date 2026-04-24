@@ -39,11 +39,23 @@ class CourseAlreadyExistsError(Exception):
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    # Enforce foreign-key constraints
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    def _open(path: Path) -> sqlite3.Connection:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        # Enforce foreign-key constraints
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
+
+    try:
+        return _open(DB_PATH)
+    except sqlite3.OperationalError:
+        # Serverless fallback: if configured/default path cannot be opened
+        # (read-only bundle, missing dir, etc.), use writable /tmp.
+        fallback = Path("/tmp/coursebot.db")
+        if DB_PATH == fallback:
+            raise
+        return _open(fallback)
 
 
 def init_db() -> None:
