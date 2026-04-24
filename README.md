@@ -142,3 +142,14 @@ This loads the **54** courses defined in the seed script (see above).
 
 7. **Frontend** — Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) for the chat page. Use toggles for “AI answer (RAG)” and “Show prompt debug”.
 
+---
+
+### Deploying to Vercel (and similar serverless)
+
+Vercel discovers FastAPI at certain filenames only (see [Vercel’s FastAPI docs](https://vercel.com/docs/frameworks/backend/fastapi)). This project defines the app in [`app/main.py`](app/main.py) and re-exports it from [`app/index.py`](app/index.py) so the platform can find the `app` instance.
+
+- **Set environment variables** in the Vercel project: at least `OPENAI_API_KEY` (and `OPENAI_MODEL` if you want a non-default model). Vercel sets `VERCEL=1` automatically.
+- **SQLite** — On Vercel the deploy bundle is not a reliable place to *write* a database file. When `VERCEL=1`, the app uses `/tmp/coursebot.db` by default. That location can be **empty or reset** across cold starts; run [`scripts/seed_courses.py`](scripts/seed_courses.py) locally, commit a **separate** strategy for production (hosted SQL), or use an external store if you need **durable** data.
+- **Optional** — `COURSEBOT_SQLITE_PATH` overrides the database file path (see [`.env.example`](.env.example)).
+- If you still see **`FUNCTION_INVOCATION_FAILED`**, open **Vercel → your deployment → Logs**; the *nested* error (import error, timeout, `readonly database`, etc.) is what you need to fix.
+

@@ -1,10 +1,26 @@
+import os
 import sqlite3
 from pathlib import Path
 from typing import Iterable, List, Optional, TypedDict
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "coursebot.db"
+
+
+def _resolve_db_path() -> Path:
+    """
+    Local dev: project root `coursebot.db`. Serverless (e.g. Vercel): project
+    tree is read-only, so use /tmp. Override with COURSEBOT_SQLITE_PATH.
+    """
+    override = os.environ.get("COURSEBOT_SQLITE_PATH", "").strip()
+    if override:
+        return Path(override)
+    if os.environ.get("VERCEL", "").lower() in ("1", "true", "yes"):
+        return Path("/tmp/coursebot.db")
+    return BASE_DIR / "coursebot.db"
+
+
+DB_PATH = _resolve_db_path()
 
 
 class CourseRow(TypedDict):
