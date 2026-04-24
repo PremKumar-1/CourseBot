@@ -128,6 +128,15 @@ def init_db() -> None:
         conn.commit()
 
 
+def count_courses() -> int:
+    """Return total number of courses currently stored."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM courses;")
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
+
+
 def get_or_create_professor(name: str) -> int:
     """Return professor id for name, inserting if needed."""
     clean = name.strip()

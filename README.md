@@ -73,7 +73,7 @@ Tables and migrations (e.g. adding `professor_id`) run automatically on applicat
 ### Key Endpoints for Checkpoint 1 Demo
 
 - **Health check**
-  - `GET /health` – simple `"status": "ok"` response.
+  - `GET /health` – returns `"status": "ok"` plus deploy diagnostics (`build_id`, `db_path`).
 
 - **Insert a new course**
   - `POST /courses`
@@ -146,7 +146,7 @@ This loads the **54** courses defined in the seed script (see above).
 
 ### Deploying to Vercel (and similar serverless)
 
-Vercel discovers FastAPI at certain filenames only (see [Vercel’s FastAPI docs](https://vercel.com/docs/frameworks/backend/fastapi)). This project defines the app in [`app/main.py`](app/main.py) and re-exports it from [`app/index.py`](app/index.py) so the platform can find the `app` instance.
+Vercel discovers Python serverless handlers under `api/` (see [Vercel’s FastAPI docs](https://vercel.com/docs/frameworks/backend/fastapi)). This project defines the app in [`app/main.py`](app/main.py) and re-exports it from [`api/index.py`](api/index.py), with [`vercel.json`](vercel.json) rewriting all paths to that handler.
 
 - **Set environment variables** in the Vercel project: at least `OPENAI_API_KEY` (and `OPENAI_MODEL` if you want a non-default model). Vercel sets `VERCEL=1` automatically.
 - **SQLite** — On Vercel the deploy bundle is not a reliable place to *write* a database file. When `VERCEL=1`, the app uses `/tmp/coursebot.db` by default. That location can be **empty or reset** across cold starts; run [`scripts/seed_courses.py`](scripts/seed_courses.py) locally, commit a **separate** strategy for production (hosted SQL), or use an external store if you need **durable** data.

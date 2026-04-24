@@ -16,6 +16,12 @@ from . import rag
 APP_BUILD_ID = os.environ.get("APP_BUILD_ID", "local-dev-2026-04-24")
 
 
+def _should_auto_seed() -> bool:
+    # Default behavior: seed automatically on Vercel when DB is empty.
+    value = os.environ.get("COURSEBOT_AUTO_SEED", "true").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
 class CourseCreate(BaseModel):
     course_code: str = Field(..., example="CS101")
     title: str = Field(..., example="Introduction to Computer Science")
@@ -64,6 +70,13 @@ def on_startup() -> None:
         os.environ["COURSEBOT_SQLITE_PATH"] = "/tmp/coursebot.db"
         db.DB_PATH = db._resolve_db_path()  # type: ignore[attr-defined]
         db.init_db()
+
+    # Serverless storage can start empty. Seed demo data once per fresh DB.
+    if os.environ.get("VERCEL", "").lower() in ("1", "true", "yes"):
+        if _should_auto_seed() and db.count_courses() == 0:
+            from scripts.seed_courses import main as seed_courses_main
+
+            seed_courses_main()
 
 
 @app.get("/health", tags=["system"])
