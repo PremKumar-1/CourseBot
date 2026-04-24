@@ -7,6 +7,16 @@ from typing import Iterable, List, Optional, TypedDict
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _is_writable_db_path(path: Path) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8"):
+            pass
+        return True
+    except OSError:
+        return False
+
+
 def _resolve_db_path() -> Path:
     """
     Local dev: project root `coursebot.db`. Serverless (e.g. Vercel): project
@@ -14,10 +24,15 @@ def _resolve_db_path() -> Path:
     """
     override = os.environ.get("COURSEBOT_SQLITE_PATH", "").strip()
     if override:
-        return Path(override)
+        override_path = Path(override)
+        if _is_writable_db_path(override_path):
+            return override_path
+    default_path = BASE_DIR / "coursebot.db"
     if os.environ.get("VERCEL", "").lower() in ("1", "true", "yes"):
-        return Path("/tmp/coursebot.db")
-    return BASE_DIR / "coursebot.db"
+        default_path = Path("/tmp/coursebot.db")
+    if _is_writable_db_path(default_path):
+        return default_path
+    return Path("/tmp/coursebot.db")
 
 
 DB_PATH = _resolve_db_path()
@@ -47,14 +62,18 @@ def get_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
 
+    global DB_PATH
+    primary_path = _resolve_db_path()
+    DB_PATH = primary_path
     try:
-        return _open(DB_PATH)
-    except sqlite3.OperationalError:
+        return _open(primary_path)
+    except (sqlite3.OperationalError, OSError):
         # Serverless fallback: if configured/default path cannot be opened
         # (read-only bundle, missing dir, etc.), use writable /tmp.
         fallback = Path("/tmp/coursebot.db")
-        if DB_PATH == fallback:
+        if primary_path == fallback:
             raise
+        DB_PATH = fallback
         return _open(fallback)
 
 

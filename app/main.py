@@ -13,6 +13,8 @@ from . import db
 from . import query_parser
 from . import rag
 
+APP_BUILD_ID = os.environ.get("APP_BUILD_ID", "local-dev-2026-04-24")
+
 
 class CourseCreate(BaseModel):
     course_code: str = Field(..., example="CS101")
@@ -66,7 +68,7 @@ def on_startup() -> None:
 
 @app.get("/health", tags=["system"])
 def health_check() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "build_id": APP_BUILD_ID, "db_path": str(db.DB_PATH)}
 
 
 @app.post("/courses", response_model=Course, tags=["courses"])
