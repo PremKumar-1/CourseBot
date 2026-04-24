@@ -1,4 +1,5 @@
 import os
+import sqlite3
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +54,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    db.init_db()
+    try:
+        db.init_db()
+    except sqlite3.OperationalError:
+        # Serverless safety net: if initial DB path is not writable/openable,
+        # retry with /tmp which is writable on Vercel.
+        os.environ["COURSEBOT_SQLITE_PATH"] = "/tmp/coursebot.db"
+        db.DB_PATH = db._resolve_db_path()  # type: ignore[attr-defined]
+        db.init_db()
 
 
 @app.get("/health", tags=["system"])
